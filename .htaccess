@@ -1,0 +1,23 @@
+Options -Indexes
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# Protect application internals from direct HTTP access
+RewriteRule ^app/ - [F,L]
+RewriteRule ^(config\.php|config\.sample\.php)$ - [F,L]
+RewriteRule ^\.htaccess$ - [F,L]
+
+# Non-existent files/dirs -> front controller
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
+</IfModule>
+
+# Block direct access to sensitive file types
+<FilesMatch "\.(sql|log|ini|sh|md)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_dir.c>
+  DirectoryIndex index.php index.html
+</IfModule>
