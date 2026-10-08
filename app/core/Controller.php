@@ -37,19 +37,4 @@ class Controller
         echo json_encode($data);
         exit;
     }
-
-    protected function redirect($url)
-    {
-        redirect($url);
-    }
-
-    protected function back()
-    {
-        back();
-    }
-
-    protected function flashError()
-    {
-        return '';
-    }
 }

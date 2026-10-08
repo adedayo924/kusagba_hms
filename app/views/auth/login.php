@@ -26,24 +26,29 @@
         </div>
 
         <?php $flash = get_flash(); if ($flash): ?>
-          <div class="alert alert-<?= e($flash[0] === 'error' ? 'danger' : $flash[0]) ?> py-2"><?= e($flash[1]) ?></div>
+          <div class="alert alert-<?= e($flash[0] === 'error' ? 'danger' : $flash[0]) ?> py-2 alert-dismissible fade show" role="alert">
+            <?= e($flash[1]) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
         <?php endif; ?>
 
         <form method="post" action="<?= base_url('auth/login') ?>">
           <?= csrf_field() ?>
           <div class="mb-3">
-            <label class="form-label">Username</label>
+            <label class="form-label" for="username">Username</label>
             <div class="input-group">
-              <span class="input-group-text"><i class="bi bi-person"></i></span>
-              <input class="form-control" name="username" autocomplete="username" required autofocus>
+              <span class="input-group-text"><i class="bi bi-person" aria-hidden="true"></i></span>
+              <input class="form-control<?= invalid('username') ?>" id="username" name="username" autocomplete="username" required autofocus <?= old_error('username') ? 'aria-invalid="true"' : '' ?> value="<?= e(old('username')) ?>">
             </div>
+            <?= field_error('username') ?>
           </div>
           <div class="mb-4">
-            <label class="form-label">Password</label>
+            <label class="form-label" for="password">Password</label>
             <div class="input-group">
-              <span class="input-group-text"><i class="bi bi-lock"></i></span>
-              <input class="form-control" type="password" name="password" autocomplete="current-password" required>
+              <span class="input-group-text"><i class="bi bi-lock" aria-hidden="true"></i></span>
+              <input class="form-control<?= invalid('password') ?>" id="password" type="password" name="password" autocomplete="current-password" required <?= old_error('password') ? 'aria-invalid="true"' : '' ?>>
             </div>
+            <?= field_error('password') ?>
           </div>
           <div class="d-grid">
             <button class="btn btn-primary btn-lg">Sign in</button>

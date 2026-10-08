@@ -109,6 +109,15 @@ class ConsultationsController extends Controller
         ) : null;
 
         $aid = (int)post('appointment_id');
+        if ($aid) {
+            // The appointment must belong to the patient being consulted: taking
+            // the id from POST unmarked another patient's appointment as completed.
+            $apptPatientId = fetch_val('SELECT patient_id FROM appointments WHERE id = ? AND deleted_at IS NULL', [$aid]);
+            if (!$apptPatientId || (int)$apptPatientId !== $patientId) {
+                set_flash('error', 'The selected appointment belongs to a different patient.');
+                back();
+            }
+        }
 
         $id = tx(function () use ($patientId, $doctorId, $aid, $date, $visitType, $service) {
             run(
@@ -141,7 +150,7 @@ class ConsultationsController extends Controller
             }
 
             if ($aid) {
-                run('UPDATE appointments SET status = "completed" WHERE id = ? AND status != "cancelled"', [$aid]);
+                run('UPDATE appointments SET status = "completed" WHERE id = ? AND patient_id = ? AND status != "cancelled"', [$aid, $patientId]);
             }
             return $id;
         });
@@ -159,7 +168,7 @@ class ConsultationsController extends Controller
         $doctor = fetch('SELECT full_name, specialty, license_no FROM users WHERE id = ?', [$c['doctor_id']]);
         $admission = fetch(
             'SELECT x.*, w.name AS ward_name FROM admissions x JOIN wards w ON w.id = x.ward_id
-             WHERE x.patient_id = ? AND x.status = "admitted" ORDER BY x.id DESC LIMIT 1',
+             WHERE x.patient_id = ? AND x.status = "admitted" AND x.deleted_at IS NULL ORDER BY x.id DESC LIMIT 1',
             [$c['patient_id']]
         );
         $prescriptions = fetch_all(
@@ -213,6 +222,15 @@ class ConsultationsController extends Controller
         if (!strtotime($date)) $date = date('Y-m-d');
         $visitTypes = ['outpatient', 'inpatient'];
         $visitType = in_array(post('visit_type', 'outpatient'), $visitTypes, true) ? post('visit_type', 'outpatient') : 'outpatient';
+
+        // A nurse may record triage notes but must not rewrite the clinician's
+        // assessment: only a doctor (or admin) can change diagnosis/treatment plan.
+        $clinicalChanged = (post('diagnosis') ?: null) !== $before['diagnosis']
+            || (post('treatment_plan') ?: null) !== $before['treatment_plan'];
+        if ($clinicalChanged && !in_array(Auth::role(), ['doctor', 'admin'], true)) {
+            set_flash('error', 'The diagnosis and treatment plan can only be changed by a doctor.');
+            back();
+        }
 
         $after = [
             'visit_date' => $date,

@@ -6,8 +6,13 @@ page_header(
 );
 $pname = $consultation ? patient_full_name($patient) : ($patient ? patient_full_name($patient) : '');
 $formUrl = $isEdit ? 'consultations/update/' . $consultation['id'] : 'consultations/store';
-$g = function ($k, $default = '') use ($consultation) {
-    return $consultation && isset($consultation[$k]) && $consultation[$k] !== null ? $consultation[$k] : ($_POST[$k] ?? $default);
+$v = function ($k, $default = '') use ($consultation) {
+    if (isset($_SESSION['old'][$k])) return $_SESSION['old'][$k];
+    if ($consultation && array_key_exists($k, $consultation) && $consultation[$k] !== null) return $consultation[$k];
+    return $_POST[$k] ?? $default;
+};
+$sel = function ($a, $b) {
+    return (string)$a === (string)$b ? 'selected' : '';
 };
 ?>
 <div class="row">
@@ -20,41 +25,45 @@ $g = function ($k, $default = '') use ($consultation) {
         <div class="card-body">
           <div class="row g-3">
             <div class="col-md-4">
-              <label class="form-label required">Patient</label>
+              <label class="form-label required" for="patient_id">Patient</label>
               <?php if ($isEdit): ?>
                 <div class="form-control bg-light"><?= e($pname) ?></div>
                 <input type="hidden" name="patient_id" value="<?= (int)$patient['id'] ?>">
               <?php else: ?>
-                <select class="form-select" name="patient_id" required>
+                <select class="form-select<?= invalid('patient_id') ?>" id="patient_id" name="patient_id" required aria-required="true" <?= old_error('patient_id') ? 'aria-invalid="true"' : '' ?>>
                   <option value="">— select patient —</option>
                   <?php if ($patient): ?>
                     <option value="<?= $patient['id'] ?>" selected><?= e($pname) ?> — <?= e($patient['patient_no']) ?></option>
                   <?php endif; ?>
                   <?php foreach ($patients as $p): ?>
                     <?php if ($patient && (int)$p['id'] === (int)$patient['id']) continue; ?>
-                    <option value="<?= $p['id'] ?>"><?= e($p['last_name']) ?>, <?= e($p['first_name']) ?> — <?= e($p['patient_no']) ?></option>
+                    <option value="<?= $p['id'] ?>" <?= $sel($v('patient_id'), $p['id']) ?>><?= e($p['last_name']) ?>, <?= e($p['first_name']) ?> — <?= e($p['patient_no']) ?></option>
                   <?php endforeach; ?>
                 </select>
+                <?= field_error('patient_id') ?>
               <?php endif; ?>
             </div>
-            <div class="col-md-3"><label class="form-label">Visit date</label>
-              <input class="form-control" type="date" name="visit_date" value="<?= e($g('visit_date', date('Y-m-d'))) ?>"></div>
+            <div class="col-md-3"><label class="form-label" for="visit_date">Visit date</label>
+              <input class="form-control<?= invalid('visit_date') ?>" id="visit_date" type="date" name="visit_date" value="<?= e($v('visit_date', date('Y-m-d'))) ?>" <?= old_error('visit_date') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('visit_date') ?></div>
             <div class="col-md-3">
-              <label class="form-label">Type</label>
-              <select class="form-select" name="visit_type">
-                <option value="outpatient" <?= $g('visit_type', 'outpatient') === 'outpatient' ? 'selected' : '' ?>>Outpatient</option>
-                <option value="inpatient" <?= $g('visit_type') === 'inpatient' ? 'selected' : '' ?>>Inpatient</option>
+              <label class="form-label" for="visit_type">Type</label>
+              <select class="form-select<?= invalid('visit_type') ?>" id="visit_type" name="visit_type" <?= old_error('visit_type') ? 'aria-invalid="true"' : '' ?>>
+                <option value="outpatient" <?= $sel($v('visit_type', 'outpatient'), 'outpatient') ?>>Outpatient</option>
+                <option value="inpatient" <?= $sel($v('visit_type'), 'inpatient') ?>>Inpatient</option>
               </select>
+              <?= field_error('visit_type') ?>
             </div>
             <div class="col-md-2">
-              <label class="form-label">Appointment</label>
+              <label class="form-label" for="appointment_id">Appointment</label>
               <?php if ($appointment): ?>
                 <div class="form-control bg-light small">#<?= (int)$appointment['id'] ?></div>
                 <input type="hidden" name="appointment_id" value="<?= (int)$appointment['id'] ?>">
               <?php else: ?>
-                <input type="hidden" name="appointment_id" value="<?= (int)$g('appointment_id') ?>">
-                <div class="form-control-plaintext text-muted small"><?= $g('appointment_id') ? '#' . (int)$g('appointment_id') : '—' ?></div>
+                <input type="hidden" name="appointment_id" value="<?= (int)$v('appointment_id') ?>">
+                <div class="form-control-plaintext text-muted small"><?= $v('appointment_id') ? '#' . (int)$v('appointment_id') : '—' ?></div>
               <?php endif; ?>
+              <?= field_error('appointment_id') ?>
             </div>
           </div>
         </div>
@@ -64,20 +73,27 @@ $g = function ($k, $default = '') use ($consultation) {
         <div class="card-header"><i class="bi bi-activity me-1"></i> Vitals</div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-md-2"><label class="form-label">Temp (°C)</label>
-              <input class="form-control" type="number" step="0.1" name="temperature" value="<?= e($g('temperature')) ?>"></div>
-            <div class="col-md-2"><label class="form-label">BP (mmHg)</label>
-              <input class="form-control" name="blood_pressure" placeholder="120/80" value="<?= e($g('blood_pressure')) ?>"></div>
-            <div class="col-md-2"><label class="form-label">Pulse (bpm)</label>
-              <input class="form-control" type="number" name="pulse" value="<?= e($g('pulse')) ?>"></div>
-            <div class="col-md-2"><label class="form-label">Resp. rate</label>
-              <input class="form-control" type="number" name="respiratory_rate" value="<?= e($g('respiratory_rate')) ?>"></div>
-            <div class="col-md-2"><label class="form-label">Weight (kg)</label>
-              <input class="form-control" type="number" step="0.1" name="weight" value="<?= e($g('weight')) ?>"></div>
-            <div class="col-md-2"><label class="form-label">Height (cm)</label>
-              <input class="form-control" type="number" step="0.1" name="height" value="<?= e($g('height')) ?>"></div>
-            <div class="col-md-2"><label class="form-label">O₂ (%)</label>
-              <input class="form-control" type="number" name="spo2" value="<?= e($g('spo2')) ?>"></div>
+            <div class="col-md-2"><label class="form-label" for="temperature">Temp (°C)</label>
+              <input class="form-control<?= invalid('temperature') ?>" id="temperature" type="number" step="0.1" name="temperature" value="<?= e($v('temperature')) ?>" <?= old_error('temperature') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('temperature') ?></div>
+            <div class="col-md-2"><label class="form-label" for="blood_pressure">BP (mmHg)</label>
+              <input class="form-control<?= invalid('blood_pressure') ?>" id="blood_pressure" name="blood_pressure" placeholder="120/80" value="<?= e($v('blood_pressure')) ?>" <?= old_error('blood_pressure') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('blood_pressure') ?></div>
+            <div class="col-md-2"><label class="form-label" for="pulse">Pulse (bpm)</label>
+              <input class="form-control<?= invalid('pulse') ?>" id="pulse" type="number" name="pulse" value="<?= e($v('pulse')) ?>" <?= old_error('pulse') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('pulse') ?></div>
+            <div class="col-md-2"><label class="form-label" for="respiratory_rate">Resp. rate</label>
+              <input class="form-control<?= invalid('respiratory_rate') ?>" id="respiratory_rate" type="number" name="respiratory_rate" value="<?= e($v('respiratory_rate')) ?>" <?= old_error('respiratory_rate') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('respiratory_rate') ?></div>
+            <div class="col-md-2"><label class="form-label" for="weight">Weight (kg)</label>
+              <input class="form-control<?= invalid('weight') ?>" id="weight" type="number" step="0.1" name="weight" value="<?= e($v('weight')) ?>" <?= old_error('weight') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('weight') ?></div>
+            <div class="col-md-2"><label class="form-label" for="height">Height (cm)</label>
+              <input class="form-control<?= invalid('height') ?>" id="height" type="number" step="0.1" name="height" value="<?= e($v('height')) ?>" <?= old_error('height') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('height') ?></div>
+            <div class="col-md-2"><label class="form-label" for="spo2">O₂ (%)</label>
+              <input class="form-control<?= invalid('spo2') ?>" id="spo2" type="number" name="spo2" value="<?= e($v('spo2')) ?>" <?= old_error('spo2') ? 'aria-invalid="true"' : '' ?>>
+              <?= field_error('spo2') ?></div>
           </div>
         </div>
       </div>

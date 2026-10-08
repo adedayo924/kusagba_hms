@@ -70,31 +70,6 @@ class SettingsController extends Controller
              ON DUPLICATE KEY UPDATE svalue = VALUES(svalue)', [$key, $value]);
     }
 
-    /** Admin-only convenience route; all roles use ProfileController::password. */
-    public function password()
-    {
-        csrf_check();
-        $this->guard(['admin']);
-        $u = Auth::user();
-        if (!password_verify((string)($_POST['current_password'] ?? ''), $u['password'])) {
-            set_flash('error', 'Current password is incorrect.');
-            back();
-        }
-        $new = (string)($_POST['new_password'] ?? '');
-        if (strlen($new) < 8) {
-            set_flash('error', 'New password must be at least 8 characters.');
-            back();
-        }
-        if ($new !== (string)($_POST['confirm_password'] ?? '')) {
-            set_flash('error', 'Passwords do not match.');
-            back();
-        }
-        run('UPDATE users SET password = ? WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $u['id']]);
-        audit('update', 'settings', 'Password changed');
-        set_flash('success', 'Password updated.');
-        redirect('settings');
-    }
-
     /** Single dispatch for create and edit, decided by a hidden `id`. */
     public function services_save()
     {
@@ -105,7 +80,10 @@ class SettingsController extends Controller
             set_flash('error', 'Service name required.');
             back();
         }
-        $categories = ['consultation', 'lab', 'drug', 'ward', 'procedure', 'other'];
+        // 'caregiving' exists in the services ENUM and is the category the
+        // caregiving module's package dropdown filters on — it was missing here,
+        // so admins could not create a care package at all.
+        $categories = ['consultation', 'lab', 'drug', 'ward', 'procedure', 'caregiving', 'other'];
         $category = in_array(post('category', 'other'), $categories, true) ? post('category', 'other') : 'other';
         $code = post('code') ?: null;
         $price = max(0, (float)post('price', 0));

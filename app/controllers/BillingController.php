@@ -92,13 +92,18 @@ class BillingController extends Controller
             set_flash('error', 'Add at least one service line with a positive amount.');
             back();
         }
-        $invId = tx(function () use ($patientId, $lines) {
-            $id = open_invoice_id($patientId);
-            foreach ($lines as [$desc, $amt]) {
-                add_invoice_line($patientId, 'service', null, $desc, 1, $amt);
-            }
-            return $id;
-        });
+        try {
+            $invId = tx(function () use ($patientId, $lines) {
+                $id = open_invoice_id($patientId);
+                foreach ($lines as [$desc, $amt]) {
+                    add_invoice_line($patientId, 'service', null, $desc, 1, $amt);
+                }
+                return $id;
+            });
+        } catch (RuntimeException $e) {
+            set_flash('error', $e->getMessage());
+            back();
+        }
         audit('create', 'billing', "Invoice #$invId for patient #$patientId");
         set_flash('success', 'Invoice updated with ' . count($lines) . ' service line(s).');
         redirect('billing/show/' . $invId);
@@ -132,8 +137,27 @@ class BillingController extends Controller
         if (!$inv || $inv['status'] === 'void') not_found();
         $line = fetch('SELECT * FROM invoice_items WHERE id = ? AND invoice_id = ?', [$lineId, $invId]);
         if (!$line) not_found();
-        if (!empty($line['item_type']) && in_array($line['item_type'], ['admission', 'drug', 'lab'])) {
-            set_flash('error', 'Line ' . $lineId . ' is tied to a clinical record and cannot be removed.');
+        // Clinical charges must stay attached to their source record. The old list
+        // checked 'lab' while the app actually writes 'lab_request', so lab,
+        // consultation and caregiving lines were freely deletable.
+        $protected = ['consultation', 'lab_request', 'admission', 'drug', 'caregiving'];
+        if (!empty($line['item_type']) && in_array($line['item_type'], $protected, true)) {
+            // A lab charge is only removable once the request itself was cancelled
+            // — that is the reversal path for an investigation that never ran.
+            $removable = false;
+            if ($line['item_type'] === 'lab_request' && !empty($line['ref_id'])) {
+                $labStatus = fetch_val('SELECT status FROM lab_requests WHERE id = ?', [(int)$line['ref_id']]);
+                $removable = ($labStatus === 'cancelled');
+            }
+            if (!$removable) {
+                set_flash('error', 'Line ' . $lineId . ' is tied to a clinical record and cannot be removed.');
+                back();
+            }
+        }
+        // Removing a charge after money has changed hands is an unmodelled refund:
+        // it would drop the total below paid_amount and invent a credit balance.
+        if ((float)$inv['paid_amount'] > 0 || $inv['status'] === 'paid') {
+            set_flash('error', 'This invoice already has payments, so its lines cannot be removed. Void the invoice instead.');
             back();
         }
         run('DELETE FROM invoice_items WHERE id = ?', [$lineId]);
@@ -161,15 +185,30 @@ class BillingController extends Controller
         }
         $methods = ['cash', 'card', 'transfer', 'bank', 'other'];
         $method = in_array(post('method', 'cash'), $methods, true) ? post('method', 'cash') : 'cash';
-tx(function () use ($id, $amount, $balance, $inv, $method) {
-            $paymentNo = next_ticket('payments', 'payment_no', 'PAY');
-            run('INSERT INTO payments (payment_no, invoice_id, amount, method, reference_no, received_by, paid_at)
-                 VALUES (?,?,?,?,?,?,NOW())',
-                [$paymentNo, $id, $amount, $method, post('reference_no') ?: null, Auth::id()]);
-            $paid = (float)fetch_val('SELECT IFNULL(SUM(amount),0) FROM payments WHERE invoice_id = ?', [$id]);
-            $status = ($paid >= (float)$inv['total'] - 0.001) ? 'paid' : 'partial';
-            run('UPDATE invoices SET paid_amount = ?, status = ? WHERE id = ?', [$paid, $status, $id]);
-        });
+        try {
+            tx(function () use ($id, $amount, $method) {
+                // The balance is re-read and re-checked under a row lock: validating
+                // only before the transaction let two concurrent payments that each
+                // fit the balance sum past the invoice total.
+                $fresh = fetch('SELECT * FROM invoices WHERE id = ? FOR UPDATE', [$id]);
+                if (!$fresh || $fresh['status'] === 'void') {
+                    throw new RuntimeException('This invoice can no longer take payments.');
+                }
+                if ($amount > invoice_balance($fresh) + 0.001) {
+                    throw new RuntimeException('Amount exceeds outstanding balance of ' . money(invoice_balance($fresh)) . '.');
+                }
+                $paymentNo = next_ticket('payments', 'payment_no', 'PAY');
+                run('INSERT INTO payments (payment_no, invoice_id, amount, method, reference_no, received_by, paid_at)
+                     VALUES (?,?,?,?,?,?,NOW())',
+                    [$paymentNo, $id, $amount, $method, post('reference_no') ?: null, Auth::id()]);
+                $paid = (float)fetch_val('SELECT IFNULL(SUM(amount),0) FROM payments WHERE invoice_id = ?', [$id]);
+                run('UPDATE invoices SET paid_amount = ? WHERE id = ?', [$paid, $id]);
+                recompute_invoice($id);
+            });
+        } catch (RuntimeException $e) {
+            set_flash('error', $e->getMessage());
+            back();
+        }
         audit('create', 'billing', "Payment " . money($amount) . " on invoice #$id");
         set_flash('success', 'Payment recorded.');
         redirect('billing/show/' . $id);

@@ -178,7 +178,7 @@ $showArchived = $showArchived ?? false;
     <div class="col-md-6">
       <label class="form-label" for="vCategory">Category</label>
       <select class="form-select" name="category" id="vCategory">
-        <?php foreach (['consultation', 'lab', 'drug', 'ward', 'procedure', 'other'] as $c): ?>
+        <?php foreach (['consultation', 'lab', 'drug', 'ward', 'procedure', 'caregiving', 'other'] as $c): ?>
           <option value="<?= e($c) ?>"><?= e(ucfirst($c)) ?></option>
         <?php endforeach; ?>
       </select>

@@ -4,7 +4,8 @@ if ($r['status'] === 'pending') {
     $buttons .= '<form method="post" action="' . base_url('lab/collect/' . $r['id']) . '" class="d-inline">' . csrf_field() . '<button class="btn btn-outline-info">Collect sample</button></form>';
 }
 if (in_array($r['status'], ['pending', 'sample_collected', 'processing'], true)) {
-    $buttons .= '<form method="post" action="' . base_url('lab/cancel/' . $r['id']) . '" class="d-inline" onsubmit="return confirm(\'Cancel this request?\')">' . csrf_field() . '<button class="btn btn-outline-danger"><i class="bi bi-x-octagon"></i></button></form>';
+    $buttons .= '<form method="post" action="' . base_url('lab/cancel/' . $r['id']) . '" class="d-inline" onsubmit="return confirm(\'Cancel this request?\')">' . csrf_field()
+        . '<button class="btn btn-outline-danger" aria-label="Cancel lab request" title="Cancel lab request"><i class="bi bi-x-octagon" aria-hidden="true"></i></button></form>';
 }
 page_header('Lab ' . $r['request_no'], 'Laboratory request', $buttons);
 ?>
@@ -50,15 +51,17 @@ page_header('Lab ' . $r['request_no'], 'Laboratory request', $buttons);
               <span class="text-muted small fw-normal"><?= e($it['category'] ?: '') ?> <?= $it['unit'] ? '· ' . e($it['unit']) : '' ?></span></td>
             <td>
               <?php if ($canEnter): ?>
-                <input class="form-control" name="results[<?= $it['req_test_id'] ?>][value]" value="<?= e($it['result_value'] ?? '') ?>">
+                <input class="form-control" name="results[<?= $it['req_test_id'] ?>][value]"
+                       aria-label="Result for <?= e($it['name']) ?>" value="<?= e($it['result_value'] ?? '') ?>">
               <?php else: ?>
-                <span class="<?= $it['result_value'] || $it['result_value'] === null ? '' : 'text-muted' ?>"><?= e($it['result_value'] ?: '—') ?></span>
+                <span class="<?= $it['result_value'] === null || $it['result_value'] === '' ? 'text-muted' : '' ?>"><?= e($it['result_value'] ?: '—') ?></span>
               <?php endif; ?>
             </td>
             <td class="small d-none d-md-table-cell text-muted"><?= e($it['normal_range'] ?: '—') ?></td>
             <td class="d-none d-md-table-cell">
               <?php if ($canEnter): ?>
-                <input class="form-control" name="results[<?= $it['req_test_id'] ?>][note]" value="<?= e($it['result_note'] ?? '') ?>">
+                <input class="form-control" name="results[<?= $it['req_test_id'] ?>][note]"
+                       aria-label="Note for <?= e($it['name']) ?>" value="<?= e($it['result_note'] ?? '') ?>">
               <?php else: ?>
                 <span class="small text-muted"><?= e($it['result_note'] ?: '—') ?></span>
               <?php endif; ?>
@@ -70,7 +73,7 @@ page_header('Lab ' . $r['request_no'], 'Laboratory request', $buttons);
     </div>
     <?php if ($canEnter): ?>
       <div class="card-footer d-flex justify-content-end">
-        <button class="btn btn-primary"><i class="bi bi-check2-circle"></i> Save results &amp; mark resulted</button>
+        <button class="btn btn-primary"><i class="bi bi-check2-circle" aria-hidden="true"></i> Save results</button>
       </div>
     <?php endif; ?>
   </form>

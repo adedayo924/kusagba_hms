@@ -48,7 +48,7 @@ class AdmissionsController extends Controller
         $patients = fetch_all('SELECT id, patient_no, first_name, last_name, phone FROM patients WHERE deleted_at IS NULL ORDER BY last_name, first_name LIMIT 500');
         $wards = fetch_all(
             'SELECT w.*,
-                    (SELECT COUNT(*) FROM admissions a WHERE a.ward_id = w.id AND a.status = "admitted") AS occupied
+                    (SELECT COUNT(*) FROM admissions a WHERE a.ward_id = w.id AND a.status = "admitted" AND a.deleted_at IS NULL) AS occupied
              FROM wards w WHERE w.deleted_at IS NULL ORDER BY w.name'
         );
         $consultants = fetch_all('SELECT id, full_name FROM users WHERE role = "doctor" AND active = 1 AND deleted_at IS NULL ORDER BY full_name');
@@ -75,14 +75,25 @@ class AdmissionsController extends Controller
             $consultantId = 0;
         }
 
+        // A patient with a live admission would double-book a bed and split the
+        // clinical record across two stays; discharge first.
+        $alreadyAdmitted = (int)fetch_val(
+            'SELECT COUNT(*) FROM admissions WHERE patient_id = ? AND status = "admitted" AND deleted_at IS NULL',
+            [$patientId]
+        );
+        if ($alreadyAdmitted) {
+            set_flash('error', 'This patient already has an active admission. Discharge it before admitting again.');
+            back();
+        }
+
         // Capacity is checked *inside* the transaction with the ward row locked.
         // The previous check-then-insert let two clerks fill the same last bed.
         $result = tx(function () use ($patientId, $wardId, $consultantId) {
-            $ward = db()->query('SELECT id, name, total_beds FROM wards WHERE id = ' . (int)$wardId . ' AND deleted_at IS NULL FOR UPDATE')->fetch();
+            $ward = fetch('SELECT id, name, total_beds FROM wards WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [$wardId]);
             if (!$ward) {
                 return ['error' => 'Please select a ward.'];
             }
-            $occupied = (int)fetch_val('SELECT COUNT(*) FROM admissions WHERE ward_id = ? AND status = "admitted"', [$wardId]);
+            $occupied = (int)fetch_val('SELECT COUNT(*) FROM admissions WHERE ward_id = ? AND status = "admitted" AND deleted_at IS NULL', [$wardId]);
             if ($occupied >= (int)$ward['total_beds']) {
                 return ['error' => $ward['name'] . ' is full (' . $ward['total_beds'] . ' beds).'];
             }
@@ -135,7 +146,7 @@ class AdmissionsController extends Controller
         $ok = tx(function () use ($id) {
             // Lock the admission row so two simultaneous submits cannot both pass
             // the status check and each add a ward-charge line.
-            $x = db()->query('SELECT * FROM admissions WHERE id = ' . (int)$id . ' FOR UPDATE')->fetch();
+            $x = fetch('SELECT * FROM admissions WHERE id = ? FOR UPDATE', [(int)$id]);
             if (!$x) return ['error' => 'Admission not found.'];
             if ($x['status'] === 'discharged') {
                 return ['error' => 'Patient already discharged.'];

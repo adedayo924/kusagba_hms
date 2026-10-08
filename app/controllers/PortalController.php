@@ -13,10 +13,15 @@ class PortalController extends Controller
     public function index()
     {
         $patientId = Auth::userPatientId();
-        $patient = fetch('SELECT * FROM patients WHERE id = ? AND deleted_at IS NULL', [$patientId]);
+        $patient = $patientId ? fetch('SELECT * FROM patients WHERE id = ? AND deleted_at IS NULL', [$patientId]) : null;
         if (!$patient) {
+            // End the session here. Redirecting to auth/logout used to bounce a
+            // logged-in user straight back to portal — an endless redirect loop
+            // with no way out except clearing cookies.
+            audit('logout', 'auth', 'Session ended: no active patient profile linked');
+            Auth::logout();
             set_flash('error', 'No active patient profile is linked to your account. Contact the front desk.');
-            redirect('auth/logout');
+            redirect('auth/login');
         }
         $appointments = fetch_all(
             'SELECT a.*, u.full_name AS doctor_name, u.specialty
@@ -101,11 +106,31 @@ class PortalController extends Controller
 
         $rate = 0;
         if ($serviceId) {
-            $rate = (float)fetch_val('SELECT price FROM services WHERE id = ?', [$serviceId]);
+            $srv = fetch(
+                "SELECT price FROM services
+                 WHERE id = ? AND category = 'caregiving' AND active = 1 AND deleted_at IS NULL",
+                [$serviceId]
+            );
+            if (!$srv) {
+                set_flash('error', 'The selected care package is no longer available. Please choose another.');
+                back();
+            }
+            $rate = (float)$srv['price'];
         }
         if ($rate <= 0) {
-            $defaultRates = ['day_8h' => 12000, 'night_12h' => 18000, 'full_24h' => 30000, 'custom' => 12000];
-            $rate = (float)($defaultRates[$shiftType] ?? 12000);
+            // Fall back to configurable stand-alone rates; the figures are stored
+            // in the hospital's configured currency rather than assumed NGN.
+            $defaultRates = [
+                'day_8h' => (float)app_setting('care_rate_day_8h', 12000),
+                'night_12h' => (float)app_setting('care_rate_night_12h', 18000),
+                'full_24h' => (float)app_setting('care_rate_full_24h', 30000),
+                'custom' => (float)app_setting('care_rate_day_8h', 12000),
+            ];
+            $rate = max(0, (float)($defaultRates[$shiftType] ?? 12000));
+            if ($rate <= 0) {
+                set_flash('error', 'Caregiving rates are not configured yet. Please contact the front desk.');
+                back();
+            }
         }
 
         $address = post('location_address') ?: null;

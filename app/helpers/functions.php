@@ -62,6 +62,54 @@ function get_flash() {
     return null;
 }
 
+/* ------------------------------------------------------- Old form input */
+
+/**
+ * Remember the submitted values of a failed form so the re-rendered page does
+ * not discard what the user typed, and remember which fields failed so they can
+ * be marked invalid.
+ *
+ * The snapshot is dropped by a shutdown handler at the end of the request that
+ * renders the form, so a later visit to an unrelated form starts clean.
+ *
+ * @param array      $data    Submitted values, keyed by field name.
+ * @param array|null $errors  field => message for fields that failed validation.
+ */
+function set_old(array $data, ?array $errors = null) {
+    static $registered = false;
+    unset($data['_token']);
+    $_SESSION['old'] = $data;
+    $_SESSION['old_errors'] = $errors ?: [];
+    if (!$registered) {
+        $registered = true;
+        register_shutdown_function(function () {
+            unset($_SESSION['old'], $_SESSION['old_errors']);
+        });
+    }
+}
+
+/** Value for a field on a re-rendered form: the rejected input, else the fallback. */
+function old($key, $default = '') {
+    return $_SESSION['old'][$key] ?? $default;
+}
+
+/** Validation message for a field, or null when it passed. */
+function old_error($key) {
+    return $_SESSION['old_errors'][$key] ?? null;
+}
+
+/** Bootstrap class for a field that failed validation ('' when it passed). */
+function invalid($key) {
+    return old_error($key) !== null ? ' is-invalid' : '';
+}
+
+/** Render the validation message for a field inside a .invalid-feedback block. */
+function field_error($key) {
+    $msg = old_error($key);
+    if ($msg === null) return '';
+    return '<div class="invalid-feedback d-block">' . e($msg) . '</div>';
+}
+
 /**
  * Format a monetary amount.
  *
@@ -227,6 +275,22 @@ function record_login_failure($username) {
     }
 }
 
+/**
+ * Drop the throttle rows for an IP+username once the password is proven right.
+ * Without this the counter only ages out of the window, so a handful of typos
+ * days apart keep stacking up and a legitimate user trips the lockout.
+ */
+function clear_login_failures($username) {
+    try {
+        run(
+            'DELETE FROM activity_logs WHERE action = "login_failed" AND ip = ? AND details = ?',
+            [client_ip(), substr(trim((string)$username), 0, 60)]
+        );
+    } catch (Throwable $e) {
+        app_log('login_throttle_clear_failed', $e->getMessage());
+    }
+}
+
 /* ------------------------------------------------------- Field-level log */
 
 /**
@@ -278,7 +342,19 @@ function soft_delete($table, $id, array $extra = []) {
         if (!preg_match('/^[a-z_]+$/', $col)) {
             throw new InvalidArgumentException('Invalid column name.');
         }
-        $set[] = "$col = " . $val;
+        // The column name is checked but the value used to be concatenated raw.
+        // Encode it so a future caller cannot smuggle SQL through $extra.
+        if ($val === null) {
+            $set[] = "$col = NULL";
+        } elseif (is_int($val) || is_float($val)) {
+            $set[] = "$col = " . $val;
+        } elseif (is_bool($val)) {
+            $set[] = "$col = " . ($val ? 1 : 0);
+        } elseif (is_string($val)) {
+            $set[] = "$col = " . db()->quote($val);
+        } else {
+            throw new InvalidArgumentException('Unsupported value type for ' . $col . '.');
+        }
     }
     return run('UPDATE `' . $table . '` SET ' . implode(', ', $set) . ' WHERE id = ? AND deleted_at IS NULL',
         [(int)$id])->rowCount();

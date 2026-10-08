@@ -12,7 +12,9 @@ class ProfileController extends Controller
 
     public function index()
     {
-        $this->guard(['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'patient']);
+        // caregiver was missing, so the "My account" link in the user menu 403'd
+        // for the newest role while its password/contact POSTs accepted any role.
+        $this->guard(['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'caregiver', 'patient']);
         $user = Auth::user();
         $recent = fetch_all(
             'SELECT * FROM activity_logs WHERE user_id = ? ORDER BY id DESC LIMIT 15',

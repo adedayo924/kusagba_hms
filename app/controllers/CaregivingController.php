@@ -7,7 +7,10 @@ class CaregivingController extends Controller
 
     public function __construct()
     {
-        $this->guard(['admin', 'doctor', 'nurse', 'receptionist', 'caregiver']);
+        // cashier is included so it can reach generate_bill(); individual actions
+        // still tighten the list, and the menu in layouts/main.php controls what
+        // each role actually sees.
+        $this->guard(['admin', 'doctor', 'nurse', 'receptionist', 'caregiver', 'cashier']);
     }
 
     public function index()
@@ -19,17 +22,20 @@ class CaregivingController extends Controller
         $careType = getp('care_type', '');
         $caregiverId = (int)getp('caregiver', 0);
         $q = getp('q');
+        $showArchived = getp('archived') === '1';
 
-        $where = 'ce.deleted_at IS NULL';
+        $where = $showArchived ? 'ce.deleted_at IS NOT NULL' : 'ce.deleted_at IS NULL';
         $params = [];
 
         // If logged-in user is a caregiver, default or restrict to their assigned cases
         if ($userRole === 'caregiver') {
             $where .= ' AND ce.primary_caregiver_id = ?';
             $params[] = $userId;
-        } elseif ($caregiverId > 0) {
+        } elseif ($caregiverId > 0 && in_array($userRole, ['admin', 'doctor', 'nurse'], true)) {
             $where .= ' AND ce.primary_caregiver_id = ?';
             $params[] = $caregiverId;
+        } elseif ($caregiverId > 0) {
+            $caregiverId = 0;
         }
 
         if (in_array($status, ['pending', 'approved', 'active', 'completed', 'cancelled'], true)) {
@@ -86,12 +92,14 @@ class CaregivingController extends Controller
             $shiftParams
         );
 
-        // Stats summary
+        // Stats summary. A caregiver only ever sees their own caseload, so their
+        // cards must not leak the organisation-wide totals.
+        $scope = $userRole === 'caregiver' ? ' AND primary_caregiver_id = ' . (int)$userId : '';
         $stats = [
-            'active' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE status = 'active' AND deleted_at IS NULL"),
-            'pending' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE status = 'pending' AND deleted_at IS NULL"),
-            'home' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE care_type = 'home' AND status IN ('approved','active') AND deleted_at IS NULL"),
-            'bedside' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE care_type = 'bedside' AND status IN ('approved','active') AND deleted_at IS NULL"),
+            'active' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE status = 'active' AND deleted_at IS NULL$scope"),
+            'pending' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE status = 'pending' AND deleted_at IS NULL$scope"),
+            'home' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE care_type = 'home' AND status IN ('approved','active') AND deleted_at IS NULL$scope"),
+            'bedside' => (int)fetch_val("SELECT COUNT(*) FROM care_engagements WHERE care_type = 'bedside' AND status IN ('approved','active') AND deleted_at IS NULL$scope"),
             'today_shifts' => count($todayShifts),
             'caregivers_count' => (int)fetch_val("SELECT COUNT(*) FROM users WHERE role = 'caregiver' AND active = 1 AND deleted_at IS NULL"),
         ];
@@ -99,7 +107,7 @@ class CaregivingController extends Controller
         $caregivers = fetch_all("SELECT id, full_name, phone, specialty FROM users WHERE role IN ('caregiver', 'nurse') AND active = 1 AND deleted_at IS NULL ORDER BY full_name");
 
         $this->view('caregiving/index', compact(
-            'engagements', 'todayShifts', 'stats', 'caregivers', 'status', 'careType', 'caregiverId', 'q', 'userRole'
+            'engagements', 'todayShifts', 'stats', 'caregivers', 'status', 'careType', 'caregiverId', 'q', 'userRole', 'showArchived'
         ));
     }
 
@@ -146,15 +154,33 @@ class CaregivingController extends Controller
             back();
         }
 
-        $totalDays = max(1, (int)post('total_days', 1));
-        if ($endDate && !$totalDays) {
-            $totalDays = max(1, (int)ceil((strtotime($endDate) - strtotime($startDate)) / 86400) + 1);
+        // Recompute the day count from the dates when both are given: the posted
+        // figure is client-controlled and could disagree with the chosen range.
+        $totalDays = (int)post('total_days', 1);
+        if ($endDate) {
+            $totalDays = (int)ceil((strtotime($endDate) - strtotime($startDate)) / 86400) + 1;
         }
+        if ($totalDays < 1) $totalDays = 1;
 
-        $ratePerShift = max(0, (float)post('rate_per_shift', 0));
-        if ($ratePerShift <= 0 && $serviceId) {
-            $srvPrice = fetch_val('SELECT price FROM services WHERE id = ?', [$serviceId]);
-            if ($srvPrice) $ratePerShift = (float)$srvPrice;
+        // When a packaged service is chosen its catalogue price is authoritative;
+        // the posted rate must never be able to undercut what the service costs.
+        if ($serviceId) {
+            $srv = fetch(
+                "SELECT price FROM services
+                 WHERE id = ? AND category = 'caregiving' AND active = 1 AND deleted_at IS NULL",
+                [$serviceId]
+            );
+            if (!$srv) {
+                set_flash('error', 'The selected caregiving service package is not available.');
+                back();
+            }
+            $ratePerShift = (float)$srv['price'];
+        } else {
+            $ratePerShift = max(0, (float)post('rate_per_shift', 0));
+            if ($ratePerShift <= 0) {
+                set_flash('error', 'A rate per shift greater than zero is required.');
+                back();
+            }
         }
 
         $locationAddress = post('location_address') ?: null;
@@ -280,7 +306,9 @@ class CaregivingController extends Controller
         $id = (int)$id;
         $newStatus = post('status');
 
-        if (!in_array($newStatus, ['approved', 'active', 'completed', 'cancelled'], true)) {
+        // Same list the status control in the view offers — 'pending' used to be
+        // offered by the form and rejected here.
+        if (!in_array($newStatus, ['pending', 'approved', 'active', 'completed', 'cancelled'], true)) {
             set_flash('error', 'Invalid status.');
             back();
         }
@@ -304,9 +332,18 @@ class CaregivingController extends Controller
         $eng = fetch('SELECT * FROM care_engagements WHERE id = ? AND deleted_at IS NULL', [$id]);
         if (!$eng) not_found();
 
-        if ($caregiverId && !fetch('SELECT id FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL', [$caregiverId])) {
-            set_flash('error', 'Selected caregiver is invalid.');
-            back();
+        if ($caregiverId) {
+            // Only actual care staff may be assigned: the foreign key accepts any
+            // users row, so without this a cashier or receptionist could be made
+            // the primary caregiver of a patient.
+            $cgRole = fetch_val(
+                "SELECT role FROM users WHERE id = ? AND role IN ('caregiver','nurse') AND active = 1 AND deleted_at IS NULL",
+                [$caregiverId]
+            );
+            if (!$cgRole) {
+                set_flash('error', 'Selected caregiver is invalid. Choose an active caregiver or nurse.');
+                back();
+            }
         }
 
         $nextStatus = ($eng['status'] === 'pending' && $caregiverId) ? 'approved' : $eng['status'];
@@ -325,13 +362,42 @@ class CaregivingController extends Controller
         $eng = fetch('SELECT * FROM care_engagements WHERE id = ? AND deleted_at IS NULL', [$id]);
         if (!$eng) not_found();
 
+        $isCaregiver = Auth::role() === 'caregiver';
+
+        // Same ownership rule as show()/shift_log_save(): a caregiver may only
+        // write to the engagement they are assigned to, never to another case.
+        if ($isCaregiver && (int)$eng['primary_caregiver_id'] !== (int)Auth::id()) {
+            forbidden();
+        }
+
         $caregiverId = (int)post('caregiver_id', 0) ?: (int)$eng['primary_caregiver_id'];
+        if ($isCaregiver) {
+            // A caregiver schedules their own shifts only, whatever was posted.
+            $caregiverId = (int)Auth::id();
+        }
         $shiftDate = post('shift_date');
         $shiftStart = post('shift_start') ?: null;
         $shiftEnd = post('shift_end') ?: null;
 
-        if (!$caregiverId || !$shiftDate) {
-            set_flash('error', 'Caregiver and shift date are required.');
+        if (!$caregiverId || !$shiftDate || !strtotime($shiftDate)) {
+            set_flash('error', 'Caregiver and a valid shift date are required.');
+            back();
+        }
+
+        $cgRole = fetch_val(
+            "SELECT role FROM users WHERE id = ? AND role IN ('caregiver','nurse') AND active = 1 AND deleted_at IS NULL",
+            [$caregiverId]
+        );
+        if (!$cgRole) {
+            set_flash('error', 'Selected caregiver is invalid. Choose an active caregiver or nurse.');
+            back();
+        }
+
+        if (fetch_val(
+            'SELECT id FROM care_shift_logs WHERE engagement_id = ? AND caregiver_id = ? AND shift_date = ?',
+            [$id, $caregiverId, $shiftDate]
+        )) {
+            set_flash('error', 'A shift is already scheduled for this caregiver on that date.');
             back();
         }
 
@@ -415,8 +481,22 @@ class CaregivingController extends Controller
         $desc = "Caregiving Services (" . ucfirst(str_replace('_', ' ', $eng['shift_type'])) . ") - "
               . ($eng['care_type'] === 'home' ? 'Home Care' : 'Bedside Care') . " [{$eng['request_no']}]";
 
-        $invId = add_invoice_line($eng['patient_id'], 'caregiving', $eng['id'], $desc, $days, $rate);
-        run('UPDATE care_engagements SET invoice_id = ? WHERE id = ?', [$invId, $id]);
+        try {
+            $invId = tx(function () use ($id, $eng, $desc, $days, $rate) {
+                // Re-read under a row lock: the invoice_id check done above was
+                // check-then-insert, so two clerics could bill the same engagement.
+                $fresh = fetch('SELECT invoice_id FROM care_engagements WHERE id = ? FOR UPDATE', [$id]);
+                if (!$fresh || $fresh['invoice_id']) {
+                    throw new RuntimeException('This engagement already has a linked invoice.');
+                }
+                $invId = add_invoice_line($eng['patient_id'], 'caregiving', $eng['id'], $desc, $days, $rate);
+                run('UPDATE care_engagements SET invoice_id = ? WHERE id = ?', [$invId, $id]);
+                return $invId;
+            });
+        } catch (RuntimeException $e) {
+            set_flash('error', $e->getMessage());
+            back();
+        }
 
         audit('create', 'billing', "Invoice generated for care engagement #{$id}");
         set_flash('success', 'Caregiving charges billed to patient invoice.');
@@ -436,5 +516,20 @@ class CaregivingController extends Controller
         audit('delete', 'caregiving', "Engagement #{$id} archived");
         set_flash('success', 'Caregiving engagement archived.');
         redirect('caregiving');
+    }
+
+    /** Archiving used to be a one-way door: no restore action existed. */
+    public function restore($id)
+    {
+        csrf_check();
+        $this->guard(['admin']);
+        $id = (int)$id;
+        if (!fetch_val('SELECT id FROM care_engagements WHERE id = ? AND deleted_at IS NOT NULL', [$id])) {
+            not_found();
+        }
+        soft_restore('care_engagements', $id);
+        audit('restore', 'caregiving', "Engagement #{$id} restored");
+        set_flash('success', 'Caregiving engagement restored.');
+        redirect('caregiving/show/' . $id);
     }
 }

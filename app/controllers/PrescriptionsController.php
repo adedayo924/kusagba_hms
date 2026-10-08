@@ -33,7 +33,7 @@ class PrescriptionsController extends Controller
              FROM prescriptions p
              JOIN patients ON patients.id = p.patient_id
              LEFT JOIN users ON users.id = p.prescribed_by
-             WHERE $where ORDER BY p.prescribed_at DESC",
+             WHERE $where ORDER BY p.prescribed_at DESC LIMIT 200",
             $params
         );
         $this->view('prescriptions/index', compact('list', 'status', 'q'));
@@ -42,8 +42,8 @@ class PrescriptionsController extends Controller
     public function create()
     {
         $this->guard(['admin', 'doctor']);
-        $patients = fetch_all('SELECT * FROM patients ORDER BY last_name, first_name');
-        $drugs = fetch_all('SELECT * FROM inventory_items WHERE category = "drug" ORDER BY name');
+        $patients = fetch_all('SELECT id, patient_no, first_name, last_name FROM patients WHERE deleted_at IS NULL ORDER BY last_name, first_name');
+        $drugs = fetch_all('SELECT * FROM inventory_items WHERE category = "drug" AND active = 1 AND deleted_at IS NULL ORDER BY name');
         $consultations = fetch_all(
             "SELECT c.*, patients.patient_no, patients.last_name AS patient_last, patients.first_name AS patient_first
              FROM consultations c JOIN patients ON patients.id = c.patient_id
@@ -64,15 +64,41 @@ class PrescriptionsController extends Controller
         $this->guard(['admin', 'doctor']);
         $patientId = (int)post('patient_id', 0);
         $consultationId = (int)post('consultation_id', 0);
-        $drugs = array_values(array_filter(array_map('intval', $_POST['drug_id'] ?? [])));
+        // Keep the form's row indexes so qty/dosage/frequency stay aligned with
+        // their drug; array_filter() alone would shift them and silently dispense
+        // the wrong quantity against the wrong line.
+        $drugs = [];
+        foreach ((array)($_POST['drug_id'] ?? []) as $i => $drugId) {
+            $drugId = (int)$drugId;
+            if ($drugId <= 0) continue;
+            $available = fetch_val(
+                'SELECT id FROM inventory_items WHERE id = ? AND category = "drug" AND active = 1 AND deleted_at IS NULL',
+                [$drugId]
+            );
+            if ($available) $drugs[(int)$i] = $drugId;
+        }
         $qtys = $_POST['qty'] ?? [];
         $dosages = $_POST['dosage'] ?? [];
         $frequencies = $_POST['frequency'] ?? [];
         $durations = $_POST['duration'] ?? [];
         $itemNotes = $_POST['item_notes'] ?? [];
         if (!$patientId || !$drugs) {
-            set_flash('error', 'Select a patient and at least one drug.');
+            set_flash('error', 'Select a patient and at least one available drug.');
             back();
+        }
+        if (!fetch('SELECT id FROM patients WHERE id = ? AND deleted_at IS NULL', [$patientId])) {
+            set_flash('error', 'Selected patient no longer exists.');
+            back();
+        }
+        if ($consultationId) {
+            // The consultation must belong to the same patient, otherwise the Rx
+            // would be filed under the wrong encounter (and the FK alone would
+            // still accept it).
+            $consultPatientId = fetch_val('SELECT patient_id FROM consultations WHERE id = ?', [$consultationId]);
+            if (!$consultPatientId || (int)$consultPatientId !== $patientId) {
+                set_flash('error', 'The selected consultation belongs to a different patient.');
+                back();
+            }
         }
         $prescriptionNo = next_ticket('prescriptions', 'prescription_no', 'RX');
         tx(function () use ($patientId, $consultationId, $drugs, $qtys, $dosages, $frequencies, $durations, $itemNotes, $prescriptionNo) {
@@ -118,7 +144,13 @@ class PrescriptionsController extends Controller
     {
         csrf_check();
         $this->guard(['admin', 'doctor']);
-        run('UPDATE prescriptions SET status = "cancelled" WHERE id = ?', [$id]);
+        $rx = fetch('SELECT id, status FROM prescriptions WHERE id = ?', [(int)$id]);
+        if (!$rx) not_found();
+        if ($rx['status'] !== 'active') {
+            set_flash('error', 'Only an active prescription can be cancelled.');
+            back();
+        }
+        run('UPDATE prescriptions SET status = "cancelled" WHERE id = ?', [(int)$id]);
         audit('cancel', 'prescriptions', "Rx #$id");
         set_flash('success', 'Prescription cancelled.');
         back();

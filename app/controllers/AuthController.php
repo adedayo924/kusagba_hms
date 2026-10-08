@@ -35,6 +35,7 @@ class AuthController extends Controller
 
             $user = Auth::attempt($username, $password);
             if ($user) {
+                clear_login_failures($username);
                 audit('login', 'auth', 'Signed in');
                 set_flash('success', 'Welcome back, ' . $user['full_name'] . '.');
                 redirect($user['role'] === 'patient' ? 'portal' : 'dashboard');

@@ -53,6 +53,7 @@ class PatientsController extends Controller
         $data = $this->payload();
         $errors = $this->validate($data);
         if ($errors) {
+            set_old($_POST, $errors);
             set_flash('error', implode(' ', $errors));
             back();
         }
@@ -106,6 +107,7 @@ class PatientsController extends Controller
              LEFT JOIN users u ON u.id = c.user_id
              WHERE c.entity_type = "patient" AND c.entity_id = ? ORDER BY c.id DESC LIMIT 20',
             [$id]
+        );
         $careEngagements = fetch_all(
             'SELECT ce.*, cg.full_name AS caregiver_name 
              FROM care_engagements ce 
@@ -202,8 +204,17 @@ class PatientsController extends Controller
             'medical_history' => $data['medical_history'] ?: null,
             'notes' => $data['notes'] ?: null,
         ];
-        $errors = $this->validate($data);
+        // Name, gender and DOB are immutable here, so they are validated against
+        // the stored record rather than the stripped payload — validating the
+        // stripped array always produced "Invalid gender"/"Invalid date of birth".
+        $check = $data;
+        $check['first_name'] = $before['first_name'];
+        $check['last_name'] = $before['last_name'];
+        $check['gender'] = $before['gender'];
+        $check['dob'] = $before['dob'] ?: '';
+        $errors = $this->validate($check);
         if ($errors) {
+            set_old($_POST, $errors);
             set_flash('error', implode(' ', $errors));
             back();
         }
@@ -234,7 +245,7 @@ class PatientsController extends Controller
         $p = $this->find($id);
 
         // A live inpatient cannot be archived — discharge them first.
-        $active = (int)fetch_val('SELECT COUNT(*) FROM admissions WHERE patient_id = ? AND status = "admitted"', [$id]);
+        $active = (int)fetch_val('SELECT COUNT(*) FROM admissions WHERE patient_id = ? AND status = "admitted" AND deleted_at IS NULL', [$id]);
         if ($active > 0) {
             set_flash('error', 'This patient is currently admitted. Discharge them before archiving the record.');
             back();
@@ -289,10 +300,13 @@ class PatientsController extends Controller
         $this->json($out);
     }
 
+    /** Bulk PHI dump: admin-only and written to the audit trail. */
     public function export()
     {
+        $this->guard(['admin']);
         $rows = fetch_all('SELECT * FROM patients WHERE deleted_at IS NULL ORDER BY id');
         $cols = ['patient_no', 'first_name', 'last_name', 'gender', 'dob', 'phone', 'email', 'address', 'occupation', 'blood_group', 'next_of_kin_name', 'next_of_kin_phone', 'allergies', 'created_at'];
+        audit('export', 'patients', 'CSV export of ' . count($rows) . ' patient record(s)');
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename=patients_' . date('Ymd_His') . '.csv');
         $out = fopen('php://output', 'w');
@@ -325,13 +339,15 @@ class PatientsController extends Controller
         ];
     }
 
+    /** @return array field => message, so the form can mark the failing input. */
     private function validate($d)
     {
         $errors = [];
-        if ($d['first_name'] === '' || $d['last_name'] === '') $errors[] = 'First and last name are required.';
-        if (!in_array($d['gender'], ['Male', 'Female', 'Other'], true)) $errors[] = 'Invalid gender.';
-        if ($d['dob'] !== '' && !strtotime($d['dob'])) $errors[] = 'Invalid date of birth.';
-        if ($d['email'] !== '' && !filter_var($d['email'], FILTER_VALIDATE_EMAIL)) $errors[] = 'Invalid email address.';
+        if (($d['first_name'] ?? '') === '') $errors['first_name'] = 'First name is required.';
+        if (($d['last_name'] ?? '') === '') $errors['last_name'] = 'Last name is required.';
+        if (!in_array($d['gender'] ?? '', ['Male', 'Female', 'Other'], true)) $errors['gender'] = 'Invalid gender.';
+        if (($d['dob'] ?? '') !== '' && !strtotime($d['dob'])) $errors['dob'] = 'Invalid date of birth.';
+        if (($d['email'] ?? '') !== '' && !filter_var($d['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Invalid email address.';
         return $errors;
     }
 

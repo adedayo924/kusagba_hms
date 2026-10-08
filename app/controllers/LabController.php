@@ -63,8 +63,10 @@ class LabController extends Controller
              ORDER BY lt.category, lt.name",
             [$id]
         );
+        // Results are only enterable once the sample has been collected; the
+        // server enforces the same rule in results().
         $canEnter = in_array(Auth::role(), ['admin', 'lab'], true)
-            && in_array($r['status'], ['pending', 'sample_collected', 'processing'], true);
+            && in_array($r['status'], ['sample_collected', 'processing'], true);
         $this->title = 'Lab ' . $r['request_no'];
         $this->view('lab/show', compact('r', 'items', 'canEnter'));
     }
@@ -106,8 +108,30 @@ class LabController extends Controller
         $doctorId = in_array(Auth::role(), ['doctor', 'lab'], true) ? (int)Auth::id() : null;
         $requestedBy = (int)Auth::id();
 
+        // Resolve the tests up front. Stale or archived ids used to be skipped
+        // silently, which could persist a request with no tests at all — a dead
+        // record that sat in the lab queue for ever.
+        $tests = [];
+        foreach ($testIds as $testId) {
+            $t = fetch('SELECT id, name, price FROM lab_tests WHERE id = ? AND active = 1 AND deleted_at IS NULL', [$testId]);
+            if ($t) $tests[(int)$t['id']] = $t;
+        }
+        if (!$tests) {
+            set_flash('error', 'None of the selected tests are available. Choose at least one active test.');
+            back();
+        }
+
+        $consultationId = (int)post('consultation_id', 0) ?: null;
+        if ($consultationId) {
+            $owner = fetch_val('SELECT patient_id FROM consultations WHERE id = ?', [$consultationId]);
+            if (!$owner || (int)$owner !== $patientId) {
+                set_flash('error', 'The selected consultation does not belong to this patient.');
+                back();
+            }
+        }
+
         try {
-            $requestId = tx(function () use ($patientId, $testIds, $doctorId, $requestedBy) {
+            $requestId = tx(function () use ($patientId, $tests, $doctorId, $requestedBy, $consultationId) {
                 $no = next_ticket('lab_requests', 'request_no', 'LR');
                 run(
                     'INSERT INTO lab_requests
@@ -116,7 +140,7 @@ class LabController extends Controller
                     [
                         $no,
                         $patientId,
-                        post('consultation_id') ?: null,
+                        $consultationId,
                         $doctorId,
                         in_array(post('priority'), ['routine', 'urgent', 'stat'], true) ? post('priority') : 'routine',
                         post('clinical_notes') ?: null,
@@ -126,10 +150,8 @@ class LabController extends Controller
                     ]
                 );
                 $id = last_id();
-                foreach ($testIds as $testId) {
-                    $t = fetch('SELECT name, price FROM lab_tests WHERE id = ? AND active = 1 AND deleted_at IS NULL', [$testId]);
-                    if (!$t) continue;
-                    run('INSERT INTO lab_request_tests (lab_request_id, test_id) VALUES (?, ?)', [$id, $testId]);
+                foreach ($tests as $t) {
+                    run('INSERT INTO lab_request_tests (lab_request_id, test_id) VALUES (?, ?)', [$id, $t['id']]);
                     add_invoice_line($patientId, 'lab_request', $id, $t['name'], 1, $t['price']);
                 }
                 return $id;
@@ -163,23 +185,47 @@ class LabController extends Controller
             array_merge([$id], $ids)
         );
         $allowed = array_map('intval', array_column($allowed, 'id'));
-        foreach ($results as $rid => $v) {
-            $rid = (int)$rid;
-            if (!in_array($rid, $allowed, true)) continue;
-            if (is_array($v)) {
-                $value = trim((string)($v['value'] ?? '')) ?: null;
-                $note = trim((string)($v['note'] ?? '')) ?: null;
-            } else {
-                $value = trim((string)$v) ?: null;
-                $note = null;
-            }
-            run(
-                'UPDATE lab_request_tests SET result_value = ?, result_note = ?, resulted_by = ?, resulted_at = ? WHERE id = ?',
-                [$value, $note, (int)Auth::id(), date('Y-m-d H:i:s'), $rid]
-            );
+
+        try {
+            tx(function () use ($id, $results, $allowed) {
+                // Re-read under a lock and require a collected sample: results
+                // used to be enterable on a request nobody had collected, and the
+                // per-row updates ran outside any transaction, so a failure
+                // halfway through left a "resulted" request with partial data.
+                $fresh = fetch('SELECT status FROM lab_requests WHERE id = ? FOR UPDATE', [$id]);
+                if (!$fresh || in_array($fresh['status'], ['pending', 'cancelled'], true)) {
+                    throw new RuntimeException('Results can only be entered after the sample has been collected.');
+                }
+                foreach ($results as $rid => $v) {
+                    $rid = (int)$rid;
+                    if (!in_array($rid, $allowed, true)) continue;
+                    if (is_array($v)) {
+                        $value = trim((string)($v['value'] ?? '')) ?: null;
+                        $note = trim((string)($v['note'] ?? '')) ?: null;
+                    } else {
+                        $value = trim((string)$v) ?: null;
+                        $note = null;
+                    }
+                    run(
+                        'UPDATE lab_request_tests SET result_value = ?, result_note = ?, resulted_by = ?, resulted_at = ? WHERE id = ?',
+                        [$value, $note, (int)Auth::id(), date('Y-m-d H:i:s'), $rid]
+                    );
+                }
+                // 'processing' now means what it says: results are part-entered.
+                $outstanding = (int)fetch_val(
+                    'SELECT COUNT(*) FROM lab_request_tests WHERE lab_request_id = ? AND result_value IS NULL',
+                    [$id]
+                );
+                $status = $outstanding > 0 ? 'processing' : 'resulted';
+                run(
+                    'UPDATE lab_requests SET status = ?, resulted_by = ?, resulted_at = ? WHERE id = ?',
+                    [$status, (int)Auth::id(), $status === 'resulted' ? date('Y-m-d H:i:s') : null, $id]
+                );
+            });
+        } catch (RuntimeException $e) {
+            set_flash('error', $e->getMessage());
+            back();
         }
-        run("UPDATE lab_requests SET status = 'resulted', resulted_by = ?, resulted_at = ? WHERE id = ?",
-            [(int)Auth::id(), date('Y-m-d H:i:s'), $id]);
         audit('update', 'lab', "Lab results #$id");
         set_flash('success', 'Results saved.');
         redirect('lab/' . $id);
@@ -205,10 +251,22 @@ class LabController extends Controller
     {
         csrf_check();
         $this->guard(['admin', 'lab']);
-        if (!fetch('SELECT id FROM lab_requests WHERE id = ?', [$id])) not_found();
+        $r = fetch('SELECT status FROM lab_requests WHERE id = ?', [$id]);
+        if (!$r) not_found();
+        if ($r['status'] === 'cancelled') {
+            set_flash('error', 'This request is already cancelled.');
+            back();
+        }
+        // Issued results are a clinical record — voiding them here would leave a
+        // signed-off report with no trace. Only pre-result work can be cancelled,
+        // which also makes the matching invoice line removable by billing.
+        if ($r['status'] === 'resulted') {
+            set_flash('error', 'Results have been issued for this request, so it can no longer be cancelled.');
+            back();
+        }
         run("UPDATE lab_requests SET status = 'cancelled' WHERE id = ?", [$id]);
         audit('cancel', 'lab', "Lab request #$id");
-        set_flash('success', 'Lab request cancelled.');
+        set_flash('success', 'Lab request cancelled. Its invoice line can now be removed from the invoice if required.');
         redirect('lab');
     }
 

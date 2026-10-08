@@ -1,19 +1,21 @@
 <?php
-$patientName = e($engagement['patient_name']);
-$actions = '<a href="' . base_url('caregiving') . '" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> All Cases</a>';
+// page_header() escapes its arguments, so pass raw text — not pre-escaped HTML.
+$patientName = $engagement['patient_name'];
+$actions = '<a href="' . base_url('caregiving') . '" class="btn btn-outline-secondary"><i class="bi bi-arrow-left" aria-hidden="true"></i> All Cases</a>';
 
-if (in_array(Auth::role(), ['admin', 'doctor', 'nurse', 'receptionist'])) {
+// Billing action: same roles as BillingController's staff-only guard.
+if (in_array(Auth::role(), ['admin', 'cashier', 'receptionist'], true)) {
     if (!$engagement['invoice_id']) {
         $actions .= ' <form method="post" action="' . base_url('caregiving/generate_bill/' . $engagement['id']) . '" class="d-inline">'
-            . csrf_field() . '<button class="btn btn-outline-success"><i class="bi bi-receipt"></i> Generate Bill</button></form>';
-    }
-    if (Auth::role() === 'admin') {
-        $actions .= ' <form method="post" action="' . base_url('caregiving/delete/' . $engagement['id']) . '" class="d-inline" onsubmit="return confirm(\'Archive this caregiving engagement?\')">'
-            . csrf_field() . '<button class="btn btn-outline-danger"><i class="bi bi-archive"></i></button></form>';
+            . csrf_field() . '<button class="btn btn-outline-success"><i class="bi bi-receipt" aria-hidden="true"></i> Generate Bill</button></form>';
     }
 }
+if (Auth::role() === 'admin') {
+    $actions .= ' <form method="post" action="' . base_url('caregiving/delete/' . $engagement['id']) . '" class="d-inline" onsubmit="return confirm(\'Archive this caregiving engagement?\')">'
+        . csrf_field() . '<button class="btn btn-outline-danger" aria-label="Archive engagement" title="Archive engagement"><i class="bi bi-archive" aria-hidden="true"></i></button></form>';
+}
 
-page_header('Care Engagement ' . e($engagement['request_no']), "Patient: {$patientName} &middot; Registered on " . fmt_date($engagement['created_at']), $actions);
+page_header('Care Engagement ' . $engagement['request_no'], 'Patient: ' . $patientName . ' · Registered on ' . fmt_date($engagement['created_at']), $actions);
 ?>
 
 <!-- Patient & Engagement Overview Banner -->
