@@ -27,6 +27,8 @@ class Auth
 
     public static function login($uid)
     {
+        self::$user = null;
+        self::$loaded = false;
         session_regenerate_id(true);
         $_SESSION['uid'] = (int)$uid;
         $_SESSION['login_at'] = time();
@@ -36,6 +38,8 @@ class Auth
 
     public static function logout()
     {
+        self::$user = null;
+        self::$loaded = false;
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $p = session_get_cookie_params();

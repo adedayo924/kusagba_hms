@@ -46,6 +46,90 @@ class PortalController extends Controller
             'SELECT * FROM invoices WHERE patient_id = ? AND status != "void" ORDER BY id DESC LIMIT 6',
             [$patientId]
         );
-        $this->view('portal/index', compact('patient', 'appointments', 'visits', 'prescriptions', 'lab', 'invoices'), 'portal');
+
+        $careEngagements = fetch_all(
+            'SELECT ce.*, cg.full_name AS caregiver_name, cg.phone AS caregiver_phone,
+                    (SELECT COUNT(*) FROM care_shift_logs sl WHERE sl.engagement_id = ce.id AND sl.status = "completed") AS completed_shifts
+             FROM care_engagements ce 
+             LEFT JOIN users cg ON cg.id = ce.primary_caregiver_id 
+             WHERE ce.patient_id = ? AND ce.deleted_at IS NULL 
+             ORDER BY ce.id DESC LIMIT 6',
+            [$patientId]
+        );
+
+        $careLogs = fetch_all(
+            'SELECT sl.*, cg.full_name AS caregiver_name, ce.request_no
+             FROM care_shift_logs sl 
+             JOIN care_engagements ce ON ce.id = sl.engagement_id 
+             JOIN users cg ON cg.id = sl.caregiver_id 
+             WHERE ce.patient_id = ? AND sl.status = "completed" 
+             ORDER BY sl.shift_date DESC, sl.id DESC LIMIT 10',
+            [$patientId]
+        );
+
+        $carePackages = fetch_all(
+            "SELECT * FROM services WHERE category = 'caregiving' AND active = 1 AND deleted_at IS NULL ORDER BY price ASC"
+        );
+
+        $this->view('portal/index', compact(
+            'patient', 'appointments', 'visits', 'prescriptions', 'lab', 'invoices',
+            'careEngagements', 'careLogs', 'carePackages'
+        ), 'portal');
+    }
+
+    public function care_request()
+    {
+        csrf_check();
+        $patientId = (int)Auth::userPatientId();
+        if (!$patientId) {
+            set_flash('error', 'Profile not found.');
+            back();
+        }
+
+        $careType = in_array(post('care_type'), ['home', 'bedside'], true) ? post('care_type') : 'home';
+        $shiftType = in_array(post('shift_type'), ['day_8h', 'night_12h', 'full_24h', 'custom'], true) ? post('shift_type') : 'day_8h';
+        $serviceId = (int)post('service_id', 0) ?: null;
+
+        $startDate = post('start_date');
+        if (!$startDate || !strtotime($startDate)) {
+            set_flash('error', 'Please provide a valid start date.');
+            back();
+        }
+
+        $totalDays = max(1, (int)post('total_days', 7));
+        $endDate = date('Y-m-d', strtotime($startDate . " +" . ($totalDays - 1) . " days"));
+
+        $rate = 0;
+        if ($serviceId) {
+            $rate = (float)fetch_val('SELECT price FROM services WHERE id = ?', [$serviceId]);
+        }
+        if ($rate <= 0) {
+            $defaultRates = ['day_8h' => 12000, 'night_12h' => 18000, 'full_24h' => 30000, 'custom' => 12000];
+            $rate = (float)($defaultRates[$shiftType] ?? 12000);
+        }
+
+        $address = post('location_address') ?: null;
+        $instructions = post('special_instructions') ?: null;
+        $emergName = post('emergency_contact_name') ?: null;
+        $emergPhone = post('emergency_contact_phone') ?: null;
+
+        $requestNo = next_ticket('care_engagements', 'request_no', 'CG');
+
+        run(
+            "INSERT INTO care_engagements 
+             (request_no, patient_id, care_type, shift_type, service_id, rate_per_shift, total_days,
+              start_date, end_date, location_address, special_instructions,
+              emergency_contact_name, emergency_contact_phone, status, created_by)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)",
+            [
+                $requestNo, $patientId, $careType, $shiftType, $serviceId, $rate, $totalDays,
+                $startDate, $endDate, $address, $instructions,
+                $emergName, $emergPhone, Auth::id()
+            ]
+        );
+
+        audit('create', 'caregiving', "Portal request #{$requestNo} created by patient");
+        set_flash('success', "Your caregiving request ({$requestNo}) has been submitted successfully! Our care coordinator will contact you shortly to confirm caregiver assignment.");
+        redirect('portal');
     }
 }

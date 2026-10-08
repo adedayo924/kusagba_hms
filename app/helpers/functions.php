@@ -266,7 +266,7 @@ function changelog($entityType, $entityId, $before, $after, array $fields = []) 
 
 /** Tables eligible for archival. Hard-coded: these end up in interpolated SQL. */
 function soft_delete_tables() {
-    return ['patients', 'users', 'wards', 'services', 'lab_tests', 'inventory_items', 'admissions', 'appointments'];
+    return ['patients', 'users', 'wards', 'services', 'lab_tests', 'inventory_items', 'admissions', 'appointments', 'care_engagements'];
 }
 
 function soft_delete($table, $id, array $extra = []) {
@@ -302,6 +302,7 @@ function status_badge($status) {
         'dispensed' => 'success', 'active' => 'primary',
         'resulted' => 'success', 'processing' => 'info', 'sample_collected' => 'primary',
         'routine' => 'secondary', 'urgent' => 'warning', 'stat' => 'danger',
+        'approved' => 'info', 'in_progress' => 'warning', 'scheduled' => 'secondary', 'missed' => 'danger',
     ];
     $class = $map[$status] ?? 'secondary';
     return '<span class="badge text-bg-' . $class . '">' . e(ucfirst(str_replace('_', ' ', $status))) . '</span>';
@@ -312,6 +313,7 @@ function role_label($role) {
         'admin' => 'Administrator', 'doctor' => 'Doctor', 'nurse' => 'Nurse',
         'receptionist' => 'Receptionist', 'pharmacist' => 'Pharmacist',
         'lab' => 'Lab Technician', 'cashier' => 'Cashier / Accountant', 'patient' => 'Patient',
+        'caregiver' => 'Caregiver',
     ];
     return $map[$role] ?? $role;
 }

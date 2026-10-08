@@ -20,7 +20,7 @@ class StaffController extends Controller
         if (!$showArchived) {
             $where .= ' AND u.deleted_at IS NULL';
         }
-        if (in_array($role, ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier'], true)) {
+        if (in_array($role, ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'caregiver'], true)) {
             $where .= ' AND u.role = ?';
             $params[] = $role;
         }
@@ -49,7 +49,7 @@ class StaffController extends Controller
         $id = (int)post('id', 0);
         $username = post('username');
         $fullName = post('full_name');
-        $staffRoles = ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier'];
+        $staffRoles = ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'caregiver'];
 
         if ($fullName === '') {
             set_flash('error', 'Full name is required.');

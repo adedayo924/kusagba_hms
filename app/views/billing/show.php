@@ -22,7 +22,7 @@ page_header('Invoice ' . $inv['invoice_no'], '', $actions);
               <td class="text-end"><?= money($it['unit_price']) ?></td>
               <td class="text-end"><?= money($it['amount']) ?></td>
               <td class="text-end">
-                <?php if ($inv['status'] !== 'void' && in_array($it['item_type'], ['', 'service'], true)): ?>
+                <?php if ($inv['status'] !== 'void' && in_array($it['item_type'], ['', 'service', 'caregiving'], true)): ?>
                   <form method="post" action="<?= base_url('billing/remove_line/' . $inv['id'] . '/' . $it['id']) ?>" class="d-inline"
                         onsubmit="return confirm('Remove this line?')"><?= csrf_field() ?>
                     <button class="btn btn-sm btn-outline-danger"><i class="bi bi-x"></i></button></form>

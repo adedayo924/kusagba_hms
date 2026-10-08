@@ -10,6 +10,9 @@ class DashboardController extends Controller
         if (Auth::is_patient()) {
             redirect('portal');
         }
+        if (Auth::role() === 'caregiver') {
+            redirect('caregiving');
+        }
         $this->guard(['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier']);
 
         $today = date('Y-m-d');

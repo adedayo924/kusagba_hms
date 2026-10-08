@@ -9,7 +9,7 @@ $showArchived = $showArchived ?? false;
       <label class="visually-hidden" for="st_role">Role</label>
       <select class="form-select" id="st_role" name="role">
         <option value="" <?= $role === '' ? 'selected' : '' ?>>All roles</option>
-        <?php foreach (['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier'] as $r): ?>
+        <?php foreach (['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'caregiver'] as $r): ?>
           <option value="<?= e($r) ?>" <?= $role === $r ? 'selected' : '' ?>><?= e(role_label($r)) ?></option>
         <?php endforeach; ?>
       </select>
@@ -97,7 +97,7 @@ $showArchived = $showArchived ?? false;
     <div class="col-md-4">
       <label class="form-label required" for="sRole">Role</label>
       <select class="form-select" name="role" id="sRole" required>
-        <?php foreach (['doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'admin'] as $r): ?>
+        <?php foreach (['doctor', 'nurse', 'caregiver', 'receptionist', 'pharmacist', 'lab', 'cashier', 'admin'] as $r): ?>
           <option value="<?= e($r) ?>"><?= e(role_label($r)) ?></option>
         <?php endforeach; ?>
       </select>

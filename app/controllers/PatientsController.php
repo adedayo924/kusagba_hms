@@ -106,13 +106,20 @@ class PatientsController extends Controller
              LEFT JOIN users u ON u.id = c.user_id
              WHERE c.entity_type = "patient" AND c.entity_id = ? ORDER BY c.id DESC LIMIT 20',
             [$id]
+        $careEngagements = fetch_all(
+            'SELECT ce.*, cg.full_name AS caregiver_name 
+             FROM care_engagements ce 
+             LEFT JOIN users cg ON cg.id = ce.primary_caregiver_id 
+             WHERE ce.patient_id = ? AND ce.deleted_at IS NULL 
+             ORDER BY ce.id DESC LIMIT 15',
+            [$id]
         );
 
         $this->view('patients/show', [
             'patient' => $patient, 'visits' => $visits, 'appointments' => $appointments,
             'admissions' => $admissions, 'prescriptions' => $prescriptions,
             'labRequests' => $labRequests, 'invoices' => $invoices, 'account' => $account,
-            'changes' => $changes,
+            'changes' => $changes, 'careEngagements' => $careEngagements,
         ]);
     }
 

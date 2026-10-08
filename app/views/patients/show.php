@@ -29,6 +29,7 @@ page_header('Patient record', 'Full medical and administrative record for this p
     </div>
     <a class="btn btn-sm btn-outline-success" href="<?= base_url('appointments/create?patient=' . $patient['id']) ?>"><i class="bi bi-calendar-plus"></i> Book appointment</a>
     <a class="btn btn-sm btn-outline-success" href="<?= base_url('consultations/create?patient=' . $patient['id']) ?>"><i class="bi bi-clipboard2-plus"></i> New consultation</a>
+    <a class="btn btn-sm btn-outline-success" href="<?= base_url('caregiving/create?patient=' . $patient['id']) ?>"><i class="bi bi-heart-pulse"></i> Caregiver</a>
     <a class="btn btn-sm btn-outline-success" href="<?= base_url('billing/create?patient=' . $patient['id']) ?>"><i class="bi bi-receipt"></i> Bill</a>
   </div>
 </div>
@@ -75,6 +76,7 @@ page_header('Patient record', 'Full medical and administrative record for this p
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-admissions">Admissions (<?= count($admissions) ?>)</button></li>
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-rx">Prescriptions (<?= count($prescriptions) ?>)</button></li>
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-lab">Laboratory (<?= count($labRequests) ?>)</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-caregiving">Caregiving (<?= count($careEngagements ?? []) ?>)</button></li>
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-billing">Billing (<?= count($invoices) ?>)</button></li>
 </ul>
 
@@ -244,6 +246,55 @@ page_header('Patient record', 'Full medical and administrative record for this p
         </tbody>
       </table>
     </div>
+    <?php endif; ?>
+  </div>
+
+  <div class="tab-pane fade" id="tab-caregiving">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0 fw-semibold text-secondary">Caregiving Engagements &amp; Home Care</h6>
+      <a class="btn btn-sm btn-primary" href="<?= base_url('caregiving/create?patient=' . $patient['id']) ?>">
+        <i class="bi bi-plus-lg"></i> New Care Engagement
+      </a>
+    </div>
+    <?php if (empty($careEngagements)): ?>
+      <?= empty_block('No caregiving services recorded for this patient yet.') ?>
+    <?php else: ?>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Request #</th>
+              <th>Delivery Type</th>
+              <th>Shift Package</th>
+              <th>Dates</th>
+              <th>Assigned Caregiver</th>
+              <th>Rate / Shift</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($careEngagements as $ce): ?>
+              <tr>
+                <td class="fw-semibold"><a href="<?= base_url('caregiving/show/' . $ce['id']) ?>" class="text-decoration-none"><?= e($ce['request_no']) ?></a></td>
+                <td>
+                  <?php if ($ce['care_type'] === 'home'): ?>
+                    <span class="badge text-bg-info"><i class="bi bi-house-door"></i> Home</span>
+                  <?php else: ?>
+                    <span class="badge text-bg-secondary"><i class="bi bi-hospital"></i> Bedside</span>
+                  <?php endif; ?>
+                </td>
+                <td class="small"><?= e(ucfirst(str_replace('_', ' ', $ce['shift_type']))) ?></td>
+                <td class="small"><?= fmt_date($ce['start_date']) ?> <?= $ce['end_date'] ? '&rarr; ' . fmt_date($ce['end_date']) : '' ?></td>
+                <td class="small"><?= e($ce['caregiver_name'] ?: 'Unassigned') ?></td>
+                <td class="small fw-semibold"><?= money($ce['rate_per_shift']) ?></td>
+                <td><?= status_badge($ce['status']) ?></td>
+                <td><a class="btn btn-sm btn-outline-primary" href="<?= base_url('caregiving/show/' . $ce['id']) ?>">View</a></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     <?php endif; ?>
   </div>
 </div>

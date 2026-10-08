@@ -6,12 +6,13 @@ $appname = app_setting('hospital_name', defined('APP_NAME') ? APP_NAME : 'Hospit
 $role = Auth::role() ?? ($user['role'] ?? '');
 
 $menu = [
-    ['url' => 'dashboard',      'label' => 'Dashboard',     'icon' => 'bi-speedometer2',        'roles' => ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier']],
+    ['url' => 'dashboard',      'label' => 'Dashboard',     'icon' => 'bi-speedometer2',        'roles' => ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier', 'caregiver']],
     ['url' => 'patients',       'label' => 'Patients',      'icon' => 'bi-people',              'roles' => ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab', 'cashier']],
     ['url' => 'appointments',   'label' => 'Appointments',  'icon' => 'bi-calendar3',           'roles' => ['admin', 'doctor', 'nurse', 'receptionist']],
     ['url' => 'consultations',  'label' => 'Consultations', 'icon' => 'bi-clipboard2-pulse',    'roles' => ['admin', 'doctor', 'nurse']],
     ['url' => 'admissions',     'label' => 'Admissions',    'icon' => 'bi-hospital',            'roles' => ['admin', 'doctor', 'nurse', 'receptionist']],
     ['url' => 'wards',          'label' => 'Wards',         'icon' => 'bi-buildings',           'roles' => ['admin', 'nurse']],
+    ['url' => 'caregiving',     'label' => 'Caregiving',     'icon' => 'bi-heart-pulse',         'roles' => ['admin', 'doctor', 'nurse', 'receptionist', 'caregiver']],
     ['url' => 'prescriptions',  'label' => 'Prescriptions', 'icon' => 'bi-prescription2',       'roles' => ['admin', 'doctor', 'pharmacist', 'nurse']],
     ['url' => 'pharmacy',       'label' => 'Pharmacy',      'icon' => 'bi-capsule',             'roles' => ['admin', 'pharmacist', 'nurse']],
     ['url' => 'lab',            'label' => 'Laboratory',    'icon' => 'bi-eyedropper',          'roles' => ['admin', 'lab', 'doctor', 'nurse']],
